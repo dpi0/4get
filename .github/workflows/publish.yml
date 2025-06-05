@@ -2,6 +2,8 @@ name: Publish Docker Image to GHCR
 
 on:
   workflow_dispatch:
+  push:
+    branches: [mirror]
 
 env:
   REGISTRY: ghcr.io

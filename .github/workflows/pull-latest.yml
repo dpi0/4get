@@ -1,0 +1,20 @@
+name: Mirror latest from Gitea
+
+on:
+  schedule:
+    - cron: "0 0 */2 * *" # At 00:00 UTC every 2nd day of the month
+  workflow_dispatch:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone Gitea repository as bare
+        run: |
+          git clone --bare https://git.lolcat.ca/lolcat/4get
+
+      - name: Push to dpi0/4get 'mirror' branch
+        run: |
+          cd 4get.git
+          git remote set-url --push origin 'https://x-access-token:${{ secrets.FOURGET_TOKEN }}@github.com/${{ github.repository }}.git'
+          git push origin master:mirror
