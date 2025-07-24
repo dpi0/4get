@@ -1,59 +1,57 @@
-name: Publish Docker Image to GHCR
+name: Mirror 4get and Build Image
 on:
+  schedule:
+    - cron: '0 */48 * * *' # Every 48 hours
   workflow_dispatch:
   push:
-    branches:
-      - main
-    tags:
-      - 'v*'
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+    paths:
+      - '.github/workflows/publish.yml'
 jobs:
-  build-and-publish:
+  check-and-build:
+    name: Fetch 4get upstream and build image
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-      attestations: write
-      id-token: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          ref: mirror
-      - name: Log in to GitHub Container Registry
+      - name: Fetch upstream commit hash
+        id: upstream
+        run: |
+          commit_hash=$(git ls-remote https://git.lolcat.ca/lolcat/4get HEAD | cut -f1)
+          echo "commit-hash=$commit_hash" >> $GITHUB_OUTPUT
+          echo "Upstream commit: $commit_hash"
+      - name: Check if image exists in GHCR
+        id: check
+        run: |
+          if docker manifest inspect ghcr.io/${{ github.repository }}:${{ steps.upstream.outputs.commit-hash }} > /dev/null 2>&1; then
+            echo "build-needed=false" >> $GITHUB_OUTPUT
+            echo "Image already exists for commit ${{ steps.upstream.outputs.commit-hash }}"
+          else
+            echo "build-needed=true" >> $GITHUB_OUTPUT
+            echo "Image doesn't exist, build required"
+          fi
+      - name: Clone upstream repository at specific commit
+        if: steps.check.outputs.build-needed == 'true'
+        run: |
+          git clone https://git.lolcat.ca/lolcat/4get upstream-repo
+          cd upstream-repo
+          git checkout ${{ steps.upstream.outputs.commit-hash }}
+      - name: Prepare Docker build environment
+        if: steps.check.outputs.build-needed == 'true'
+        uses: docker/setup-buildx-action@v3
+      - name: Authenticate with GHCR
+        if: steps.check.outputs.build-needed == 'true'
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha
-            type=raw,value=latest,enable={{is_default_branch}}
       - name: Build and push Docker image
-        id: push
-        uses: docker/build-push-action@v6
+        if: steps.check.outputs.build-needed == 'true'
+        uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ./upstream-repo
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-      - name: Generate artifact attestation
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME}}
-          subject-digest: ${{ steps.push.outputs.digest }}
-          push-to-registry: true
+          tags: ghcr.io/${{ github.repository }}:${{ steps.upstream.outputs.commit-hash }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
