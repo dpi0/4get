@@ -8,7 +8,7 @@ on:
       - '.github/workflows/publish.yml'
 jobs:
   check-and-build:
-    name: Fetch 4get upstream and build image
+    name: Fetch upstream and build
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -55,3 +55,10 @@ jobs:
           tags: ghcr.io/${{ github.repository }}:${{ steps.upstream.outputs.commit-hash }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Generate artifact attestation
+        if: steps.check.outputs.build-needed == 'true'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
